@@ -1,0 +1,442 @@
+/*
+<metadata description="BlocksKeytar">
+<modes>
+<mode name="Default"/>
+
+</modes>
+</metadata>
+*/
+
+//
+//  BlocksKeytar.littlefoot
+//  BlocksKeytar 
+//
+//  Created by Brian Ping-Yao Wang on 8/4/2021.
+//  Copyright © 2021 Brian Ping-Yao Wang. All rights reserved.
+//
+
+
+// ================================================================================-
+
+int MAX_TOUCHES;
+
+int zoneToNoteOffset[30];
+
+int numTouches;
+int touchIndexToActiveIndex[255];
+
+int touchNoteOffset[10];
+int touchNoteVelocity[10];
+
+int pendingNumTouches;
+int pendingTouchNoteOffset[10];
+int pendingTouchNoteVelocity[10];
+
+int numTouchesForStrumming;
+int touchedStringForStrumming[10];
+
+int activeTouchIndexStringIndex[10];
+bool shouldSendNoteOffForTouchStringIndex[10][7];
+
+void initialiseVariables()
+{
+    MAX_TOUCHES = 10;
+    
+    zoneToNoteOffset[0] = 0;
+    zoneToNoteOffset[1] = 0;
+    zoneToNoteOffset[2] = 0;
+    zoneToNoteOffset[3] = 1;
+    zoneToNoteOffset[4] = 1;
+    zoneToNoteOffset[5] = 2;
+    zoneToNoteOffset[6] = 2;
+    zoneToNoteOffset[7] = 3;
+    zoneToNoteOffset[8] = 3;
+    zoneToNoteOffset[9] = 4;
+    zoneToNoteOffset[10] = 4;
+    zoneToNoteOffset[11] = 4;
+    zoneToNoteOffset[12] = 4;
+    zoneToNoteOffset[13] = 5;
+    zoneToNoteOffset[14] = 5;
+    zoneToNoteOffset[15] = 5;
+    zoneToNoteOffset[16] = 6;
+    zoneToNoteOffset[17] = 6;
+    zoneToNoteOffset[18] = 7;
+    zoneToNoteOffset[19] = 7;
+    zoneToNoteOffset[20] = 8;
+    zoneToNoteOffset[21] = 8;
+    zoneToNoteOffset[22] = 9;
+    zoneToNoteOffset[23] = 9;
+    zoneToNoteOffset[24] = 10;
+    zoneToNoteOffset[25] = 10;
+    zoneToNoteOffset[26] = 11;
+    zoneToNoteOffset[27] = 11;
+    zoneToNoteOffset[28] = 11;
+    zoneToNoteOffset[29] = 11;
+
+    numTouches = 0;
+    pendingNumTouches = 0;
+    numTouchesForStrumming = 0;
+    for (int i=0; i<MAX_TOUCHES; i++) {
+        touchNoteOffset[i] = -1;
+        touchNoteVelocity[i] = 0;
+        pendingTouchNoteOffset[i] = -1;
+        pendingTouchNoteVelocity[i] = 0;
+        activeTouchIndexStringIndex[i] = -1;
+    }
+    
+    for (int i=0; i<255; i++) {
+        touchIndexToActiveIndex[i] = -1;
+    }
+}
+
+// ================================================================================-
+
+int detectNote(float x) {
+    int xi = int(x * 10);
+    int octave = xi / 30;
+    return 12 * octave + zoneToNoteOffset[xi % 30];
+}
+
+void sendActiveTouchesForSeaboard() {
+    log(numTouches);
+    for (int i=0; i<numTouches; i++) {
+        sendMessageToOtherBlock(i, touchNoteOffset[i], touchNoteVelocity[i]);
+    }
+    sendMessageToOtherBlock(255, 0, numTouches);
+}
+
+void initialiseForSeaboard()
+{
+}
+
+void touchStartForSeaboard(int index, float x, float y, float z, float vz)
+{
+    logTouch(100, index, x, y, z, vz);
+    int noteOffset = detectNote(x);
+    touchNoteOffset[numTouches] = noteOffset;
+    touchNoteVelocity[numTouches] = int(z * 127);
+    touchIndexToActiveIndex[index] = numTouches;
+    numTouches++;
+    sendActiveTouchesForSeaboard();
+}
+
+void touchMoveForSeaboard(int index, float x, float y, float z, float vz)
+{
+}
+
+void touchEndForSeaboard(int index, float x, float y, float z, float vz)
+{
+    logTouch(102, index, x, y, z, vz);
+    int touchEndActiveIndex = touchIndexToActiveIndex[index];
+    if (touchEndActiveIndex != (numTouches-1)) {
+        touchNoteOffset[touchEndActiveIndex] = touchNoteOffset[numTouches-1];
+        touchNoteVelocity[touchEndActiveIndex] = touchNoteVelocity[numTouches-1];
+    }
+    touchNoteOffset[numTouches-1] = -1;
+    touchNoteVelocity[numTouches-1] = 0;
+    touchIndexToActiveIndex[index] = -1;
+    numTouches--;
+}
+
+void handleMessageForSeaboard(int param1, int param2, int param3)
+{
+}
+
+// ================================================================================-
+
+int detectString(float y)
+{
+    y *= 100.0;
+    float pixelWidth = (194.0-7.0) / 15.0;
+    int rowIndex = int((y-7.0) / pixelWidth);
+    int stringIndex = min(((14 - rowIndex) / 2), 6);
+    return stringIndex;
+}
+
+int stringIndexToNoteNumber(int stringIndex) {
+    if (stringIndex == -1) {
+        return -1;
+    }
+    int octave = stringIndex / numTouches;
+    int it = stringIndex % numTouches;
+    return 48 + touchNoteOffset[it] + 12 * octave;
+}
+
+int pressToVelocity(float z)
+{
+    return int(127.0*min(0.25+z*2, 1.0));
+}
+
+void updateAndDrawActiveTouchesForLightpad() {
+    numTouches = pendingNumTouches;
+    clearDisplay();
+    if (numTouches == 0) {
+        for (int i=0; i<7; i++) {
+            int width = 2;
+            if (i == 6) width = 3;
+            fillRect(makeAHSV(1.0, 0.0, 0.0, 0.1+0.1*i), 0, 15 - width - i * 2, 15, width);
+        }
+        return;
+    }
+    
+    for (int i; i<numTouches; i++) {
+        touchNoteOffset[i] = pendingTouchNoteOffset[i];
+        touchNoteVelocity[i] = pendingTouchNoteVelocity[i];
+    }
+
+    for (int i=0; i<7; i++) {
+        int it = i % numTouches;
+        int noteOffsetInOctave = touchNoteOffset[it] % 12;
+        int width = 2;
+        if (i == 6) width = 3;
+        fillRect(makeAHSV(1.0, float(noteOffsetInOctave)/12.0, 1.0, 0.1+0.1*i), 0, 15 - width - i * 2, 15, width);
+    }
+}
+
+void updateStrummingForTouchIndex(int index, float y, float z, bool isDownOrMove) {
+    int activeTouchIndex = touchIndexToActiveIndex[index];
+    int oldStringIndex = activeTouchIndexStringIndex[activeTouchIndex];
+    int newStringIndex = -1;
+    if (isDownOrMove) {
+        newStringIndex = detectString(y);
+    }
+    
+    if (newStringIndex != oldStringIndex) {
+        int oldNoteNumber = stringIndexToNoteNumber(oldStringIndex);
+        int newNoteNumber = stringIndexToNoteNumber(newStringIndex);
+        log(activeTouchIndex);
+        log(oldStringIndex);
+        log(oldNoteNumber);
+        log(newStringIndex);
+        log(newNoteNumber);
+        if (oldNoteNumber != -1) {
+            //sendNoteOff(1+activeTouchIndex, oldNoteNumber, int(z*127.0));
+        }
+        if (newNoteNumber != -1) {
+            if (shouldSendNoteOffForTouchStringIndex[activeTouchIndex][newStringIndex]) {
+                sendNoteOff(1+activeTouchIndex, newNoteNumber, 0);
+            } else {
+                shouldSendNoteOffForTouchStringIndex[activeTouchIndex][newStringIndex] = true;
+            }
+            sendNoteOn(1+activeTouchIndex, newNoteNumber, pressToVelocity(z));
+            
+        }
+        activeTouchIndexStringIndex[activeTouchIndex] = newStringIndex;
+    }
+}
+
+
+void sendNoteOffToAllStringsForTouch(int activeTouchIndex)
+{
+    for (int i=0; i<7; i++) {
+        if (shouldSendNoteOffForTouchStringIndex[activeTouchIndex][i]) {
+            int noteNumber = stringIndexToNoteNumber(i);
+            sendNoteOff(1+activeTouchIndex, noteNumber, 0);
+            shouldSendNoteOffForTouchStringIndex[activeTouchIndex][i] = false;
+        }
+    }
+}
+
+void initialiseForLightpad()
+{
+    updateAndDrawActiveTouchesForLightpad();
+}
+
+void touchStartForLightpad(int index, float x, float y, float z, float vz)
+{
+    touchIndexToActiveIndex[index] = numTouchesForStrumming;
+    numTouchesForStrumming++;
+    updateStrummingForTouchIndex(index, y, z, true);
+}
+
+void touchMoveForLightpad(int index, float x, float y, float z, float vz)
+{
+    updateStrummingForTouchIndex(index, y, z, true);
+}
+
+void touchEndForLightpad(int index, float x, float y, float z, float vz)
+{
+    updateStrummingForTouchIndex(index, y, z, false);
+    sendNoteOffToAllStringsForTouch(touchIndexToActiveIndex[index]);
+    touchIndexToActiveIndex[index] = -1;
+    numTouchesForStrumming--;
+    if (numTouchesForStrumming == 0) {
+        updateAndDrawActiveTouchesForLightpad();
+    }
+}
+
+void handleMessageForLightpad(int param1, int param2, int param3)
+{
+    if (param1 == 255 && param2 == 0) {
+        pendingNumTouches = param3;
+        if (numTouchesForStrumming == 0) {
+            updateAndDrawActiveTouchesForLightpad();
+        }
+    } else if (param1 < MAX_TOUCHES) {
+        pendingTouchNoteOffset[param1] = param2;
+        pendingTouchNoteVelocity[param1] = param3;
+    }
+}
+
+// ================================================================================-
+
+void logTouch(int type, int index, float x, float y, float z, float vz)
+{
+    log(type);
+    log(index);
+    int xi = int(x * 100);
+    int yi = int(y * 100);
+    int zi = int(z * 100);
+    int vzi = int(vz * 100);
+    log(xi);
+    log(yi);
+    log(zi);
+    log(vzi);
+}
+
+void logMessage(int param1, int param2, int param3)
+{
+    log(param1);
+    log(param2);
+    log(param3);
+}
+
+int getThisBlockID()
+{
+    return getBlockTypeForID(getBlockIDForIndex(0));
+}
+
+bool isSeaboardBlock(int blockType)
+{
+    return (blockType == 6);
+}
+
+bool isLightpadBlock(int blockType)
+{
+    return (blockType == 1);
+}
+
+void sendMessageToOtherBlock(int param1, int param2, int param3)
+{
+    if (getNumBlocksInTopology() < 2) {
+        return;
+    }
+    sendMessageToBlock(getBlockIDForIndex(1), param1, param2, param3);
+}
+
+int makeAHSV(float alpha, float h, float s, float v)
+{
+    // https://stackoverflow.com/a/6930407
+    float hh, p, q, t, ff;
+    int i;
+    float r, g, b;
+
+    if(s <= 0.0) {       // < is bogus, just shuts up warnings
+        r = v;
+        g = v;
+        b = v;
+        return makeARGB(int(alpha*255.0), int(r*255.0), int(g*255.0), int(b*255.0));
+    }
+    hh = h * 360.0;
+    while (hh < 0.0) hh += 360.0;
+    while (hh >= 360.0) hh -= 360.0;
+    hh /= 60.0;
+    i = int(hh);
+    ff = hh - i;
+    p = v * (1.0 - s);
+    q = v * (1.0 - (s * ff));
+    t = v * (1.0 - (s * (1.0 - ff)));
+
+    if (i == 0) {
+        r = v;
+        g = t;
+        b = p;
+    } else if (i == 1) {
+        r = q;
+        g = v;
+        b = p;
+    } else if (i == 2) {
+        r = p;
+        g = v;
+        b = t;
+    } else if (i == 3) {
+        r = p;
+        g = q;
+        b = v;
+    } else if (i == 4) {
+        r = t;
+        g = p;
+        b = v;
+    } else if (i == 5) {
+        r = v;
+        g = p;
+        b = q;
+    }
+    return makeARGB(int(alpha*255.0), int(r*255.0), int(g*255.0), int(b*255.0));
+}
+
+// ================================================================================-
+
+void initialise()
+{
+    initialiseVariables();
+    
+    log(1234);
+    log(getNumBlocksInTopology());
+    log(getBlockIDForIndex(0));
+    log(getBlockTypeForID(getBlockIDForIndex(0)));
+    log(getBlockIDForIndex(1));
+    log(getBlockTypeForID(getBlockIDForIndex(1)));
+
+    int blockType = getThisBlockID();
+    if (isSeaboardBlock(blockType)) {
+        initialiseForSeaboard();
+    } else if (isLightpadBlock(blockType)) {
+        initialiseForLightpad();
+    }
+}
+
+
+void touchStart(int index, float x, float y, float z, float vz)
+{
+    //logTouch(0, index, x, y, z, vz);
+    int blockType = getThisBlockID();
+    if (isSeaboardBlock(blockType)) {
+        touchStartForSeaboard(index, x, y, z, vz);
+    } else if (isLightpadBlock(blockType)) {
+        touchStartForLightpad(index, x, y, z, vz);
+    }
+}
+
+void touchMove(int index, float x, float y, float z, float vz)
+{
+    //logTouch(1, index, x, y, z, vz);
+    int blockType = getThisBlockID();
+    if (isSeaboardBlock(blockType)) {
+        touchMoveForSeaboard(index, x, y, z, vz);
+    } else if (isLightpadBlock(blockType)) {
+        touchMoveForLightpad(index, x, y, z, vz);
+    }
+}
+
+void touchEnd(int index, float x, float y, float z, float vz)
+{
+    //logTouch(2, index, x, y, z, vz);
+    int blockType = getThisBlockID();
+    if (isSeaboardBlock(blockType)) {
+        touchEndForSeaboard(index, x, y, z, vz);
+    } else if (isLightpadBlock(blockType)) {
+        touchEndForLightpad(index, x, y, z, vz);
+    }
+}
+
+void handleMessage(int param1, int param2, int param3)
+{
+    logMessage(param1, param2, param3);
+    int blockType = getThisBlockID();
+    if (isSeaboardBlock(blockType)) {
+        handleMessageForSeaboard(param1, param2, param3);
+    } else if (isLightpadBlock(blockType)) {
+        handleMessageForLightpad(param1, param2, param3);
+    }
+}
